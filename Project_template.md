@@ -124,6 +124,10 @@ for i in $(seq 1 10); do curl -s -o /dev/null -D - http://localhost:8000/api/mov
 
 ![Kafka UI](docs/screenshots/task2-kafka-topics.png)
 
+Логи events-service (producer отправляет, consumer обрабатывает):
+
+![Логи events-service](docs/screenshots/task2-events-logs.png)
+
 # Задание 3
 
 Команда начала переезд в Kubernetes для лучшего масштабирования и повышения надежности. 
@@ -175,6 +179,8 @@ jobs:
 Успешным результатом данного шага является "зеленая" сборка и "зеленые" тесты
 
 **Решение.** В [docker-build-push.yml](.github/workflows/docker-build-push.yml) добавлены шаги сборки и публикации образов `proxy-service` и `events-service` в `ghcr.io` (по аналогии с monolith и movies-service), а в триггер `push` добавлена ветка `cinema`. В [api-tests.yml](.github/workflows/api-tests.yml) тесты также запускаются на push в `cinema`.
+
+Образы собираются под две архитектуры (`linux/amd64,linux/arm64`, через `docker/setup-qemu-action`), чтобы их можно было запускать и на обычных серверах, и на Apple Silicon (например, в minikube на Mac).
 
 ![GitHub Actions](docs/screenshots/task3-github-actions.png)
 
@@ -347,6 +353,14 @@ cat .docker/config.json | base64
 - [ingress.yaml](src/kubernetes/ingress.yaml) — `/` → `proxy-service:80`, `/api/events` → `events-service:8082`.
 - [configmap.yaml](src/kubernetes/configmap.yaml) — добавлены `EVENTS_SERVICE_URL` и `KAFKA_BROKERS`.
 - Во всех манифестах указаны образы `ghcr.io/devpastet/architecture-cinemaabyss/*`.
+- Образы в GHCR публичные, поэтому токен для их скачивания не нужен. В [dockerconfigsecret.yaml](src/kubernetes/dockerconfigsecret.yaml) и `values.yaml` вместо реального токена лежит пустой валидный конфиг `{"auths":{}}` (base64): секрет создаётся, а в публичный репозиторий не попадает ни одного токена. Для приватных образов достаточно подставить туда свой `~/.docker/config.json` в base64.
+
+Результат развёртывания: все поды в статусе `Running`, `npm run test:kubernetes` — 22 запроса, 42 проверки, 0 ошибок (health-чеки тоже прошли, т.к. `/health` маршрутизируется через proxy). При `MOVIES_MIGRATION_PERCENT: "100"` все запросы `/api/movies` уходят в movies-service (заголовок `X-Proxy-Target: movies-service`).
+
+> **Особенности локального запуска на Mac (Apple Silicon).** Кластер — minikube (driver docker, arm64). Отличия от шагов выше, сделанные только в локальном кластере, без изменения манифестов в репозитории:
+> - образ `wurstmeister/kafka` есть только под amd64 и падает под эмуляцией, поэтому Kafka в локальном кластере запущена из arm64-образа `confluentinc/cp-kafka:7.6.1` с теми же параметрами (`kafka:9092`, те же топики);
+> - на момент развёртывания в GHCR были образы только под amd64 (мультиархитектурная сборка добавлена в CI после этого), поэтому образы сервисов собраны из этого же кода прямо в minikube (`minikube image build`) с теми же тегами, а `imagePullPolicy` в кластере переключён на `IfNotPresent`;
+> - вместо `minikube tunnel` и `/etc/hosts` использован `kubectl port-forward` ingress-контроллера на порт 8088 и `curl --resolve`, поэтому в скриншотах адрес `cinemaabyss.example.com:8088`.
 
 #### Шаг 3
 Добавьте сюда скриншота вывода при вызове https://cinemaabyss.example.com/api/movies и  скриншот вывода event-service после вызова тестов.
@@ -354,6 +368,8 @@ cat .docker/config.json | base64
 ![api/movies в Kubernetes](docs/screenshots/task3-k8s-movies.png)
 
 ![Логи events-service в Kubernetes](docs/screenshots/task3-k8s-events-logs.png)
+
+![Тесты в Kubernetes](docs/screenshots/task3-k8s-tests.png)
 
 
 # Задание 4
@@ -435,6 +451,7 @@ https://cinemaabyss.example.com/api/movies
 - В [values.yaml](src/kubernetes/helm/values.yaml) указаны свои образы.
 - В [configmap.yaml](src/kubernetes/helm/templates/configmap.yaml) исправлен `MOVIES_SERVICE_URL` (было `http://movies:...`, а сервис называется `movies-service`), добавлены `EVENTS_SERVICE_URL` и `KAFKA_BROKERS`.
 - `helm lint` и `helm template` проходят без ошибок.
+- `helm install` выполнен после полного удаления ручной установки: релиз `deployed`, все поды `Running`, `/api/movies` отвечает через ingress из чарта, `npm run test:kubernetes` — 42/42. Локальные особенности на Mac те же, что в задании 3 (в т.ч. `--set <service>.image.pullPolicy=IfNotPresent`, они видны на скриншоте).
 
 ![Helm install](docs/screenshots/task4-helm-install.png)
 
