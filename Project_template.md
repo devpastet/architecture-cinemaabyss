@@ -124,10 +124,6 @@ for i in $(seq 1 10); do curl -s -o /dev/null -D - http://localhost:8000/api/mov
 
 ![Kafka UI](docs/screenshots/task2-kafka-topics.png)
 
-Логи events-service (producer отправляет, consumer обрабатывает):
-
-![Логи events-service](docs/screenshots/task2-events-logs.png)
-
 # Задание 3
 
 Команда начала переезд в Kubernetes для лучшего масштабирования и повышения надежности. 
@@ -182,7 +178,6 @@ jobs:
 
 Образы собираются под две архитектуры (`linux/amd64,linux/arm64`, через `docker/setup-qemu-action`), чтобы их можно было запускать и на обычных серверах, и на Apple Silicon (например, в minikube на Mac).
 
-![GitHub Actions](docs/screenshots/task3-github-actions.png)
 
 
 ### Proxy в Kubernetes
@@ -359,7 +354,7 @@ cat .docker/config.json | base64
 
 > **Особенности локального запуска на Mac (Apple Silicon).** Кластер — minikube (driver docker, arm64). Отличия от шагов выше, сделанные только в локальном кластере, без изменения манифестов в репозитории:
 > - образ `wurstmeister/kafka` есть только под amd64 и падает под эмуляцией, поэтому Kafka в локальном кластере запущена из arm64-образа `confluentinc/cp-kafka:7.6.1` с теми же параметрами (`kafka:9092`, те же топики);
-> - на момент развёртывания в GHCR были образы только под amd64 (мультиархитектурная сборка добавлена в CI после этого), поэтому образы сервисов собраны из этого же кода прямо в minikube (`minikube image build`) с теми же тегами, а `imagePullPolicy` в кластере переключён на `IfNotPresent`;
+> - образы сервисов скачаны из GHCR (`ghcr.io/devpastet/architecture-cinemaabyss/*`), CI собирает их под `linux/amd64` и `linux/arm64`;
 > - вместо `minikube tunnel` и `/etc/hosts` использован `kubectl port-forward` ingress-контроллера на порт 8088 и `curl --resolve`, поэтому в скриншотах адрес `cinemaabyss.example.com:8088`.
 
 #### Шаг 3
@@ -369,7 +364,6 @@ cat .docker/config.json | base64
 
 ![Логи events-service в Kubernetes](docs/screenshots/task3-k8s-events-logs.png)
 
-![Тесты в Kubernetes](docs/screenshots/task3-k8s-tests.png)
 
 
 # Задание 4
@@ -451,7 +445,7 @@ https://cinemaabyss.example.com/api/movies
 - В [values.yaml](src/kubernetes/helm/values.yaml) указаны свои образы.
 - В [configmap.yaml](src/kubernetes/helm/templates/configmap.yaml) исправлен `MOVIES_SERVICE_URL` (было `http://movies:...`, а сервис называется `movies-service`), добавлены `EVENTS_SERVICE_URL` и `KAFKA_BROKERS`.
 - `helm lint` и `helm template` проходят без ошибок.
-- `helm install` выполнен после полного удаления ручной установки: релиз `deployed`, все поды `Running`, `/api/movies` отвечает через ingress из чарта, `npm run test:kubernetes` — 42/42. Локальные особенности на Mac те же, что в задании 3 (в т.ч. `--set <service>.image.pullPolicy=IfNotPresent`, они видны на скриншоте).
+- `helm install` выполнен после полного удаления ручной установки: релиз `deployed`, все поды `Running`, `/api/movies` отвечает через ingress из чарта. Локальные особенности на Mac те же, что в задании 3 (Kafka/ZooKeeper подменены на `confluentinc` через `--set kafka.image.*` / `--set zookeeper.image.*`).
 
 ![Helm install](docs/screenshots/task4-helm-install.png)
 
