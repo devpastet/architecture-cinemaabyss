@@ -1,0 +1,96 @@
+@startuml cinemaabyss-to-be-container
+!include <C4/C4_Container>
+
+LAYOUT_TOP_DOWN()
+LAYOUT_WITH_LEGEND()
+
+title КиноБездна — To-Be архитектура (C4, Container diagram)
+
+Person(user, "Пользователь", "Смотрит фильмы, оценивает, ведёт избранное, оплачивает подписку")
+
+System_Boundary(clients, "Клиенты") {
+  Container(web, "Web-приложение", "SPA", "Интерфейс для браузеров/ноутбуков")
+  Container(mobile, "Мобильное приложение", "iOS / Android", "Интерфейс для смартфонов")
+  Container(tv, "Smart TV приложение", "Tizen / webOS / Android TV", "Интерфейс для телевизоров")
+}
+
+System_Boundary(cinema, "КиноБездна (Kubernetes)") {
+  Container(gateway, "API Gateway (proxy-service)", "PHP / Ingress NGINX", "Единая точка входа: маршрутизация, аутентификация токенов, rate limiting, Strangler Fig с feature flag MOVIES_MIGRATION_PERCENT")
+
+  Container(bff_web, "BFF Web", "Go", "Агрегация и формат ответов под web")
+  Container(bff_mobile, "BFF Mobile", "Go", "Облегчённые ответы под мобильные устройства")
+  Container(bff_tv, "BFF Smart TV", "Go", "Ответы под Smart TV")
+
+  Container(monolith, "Монолит (legacy)", "Go", "Оставшийся функционал на время миграции, постепенно выводится из эксплуатации")
+
+  Container(users_svc, "User Service", "Go", "Домен «Пользователи»: регистрация, профиль, аутентификация (JWT)")
+  ContainerDb(users_db, "Users DB", "PostgreSQL", "Пользователи, профили")
+
+  Container(movies_svc, "Movies Service", "Go", "Домен «Каталог»: метаданные фильмов, жанры, актёры")
+  ContainerDb(movies_db, "Movies DB", "PostgreSQL", "Фильмы, жанры, актёры")
+
+  Container(ratings_svc, "Ratings & Favorites Service", "Go", "Домен «Активность»: оценки фильмов, папки избранного")
+  ContainerDb(ratings_db, "Ratings DB", "PostgreSQL", "Оценки, избранное")
+
+  Container(video_svc, "Video / Streaming Service", "Go", "Домен «Контент»: выдача ссылок на видео, агрегация внешних источников")
+  ContainerDb(video_store, "Object Storage + CDN", "S3", "Видеофайлы")
+
+  Container(subs_svc, "Subscription Service", "Go", "Домен «Подписки»: тарифы, скидки, промокоды")
+  ContainerDb(subs_db, "Subscriptions DB", "PostgreSQL", "Подписки, скидки")
+
+  Container(payments_svc, "Payment Service", "Go", "Домен «Платежи»: платежи, интеграция с платёжными системами")
+  ContainerDb(payments_db, "Payments DB", "PostgreSQL", "Платежи")
+
+  Container(events_svc, "Events Service", "PHP", "Публикация и обработка событий User/Movie/Payment")
+  ContainerQueue(kafka, "Kafka", "Apache Kafka", "Шина событий: user-events, movie-events, payment-events")
+
+  Container(integrations_svc, "Integration Service", "Go", "Адаптеры к внешним сервисам: лояльность, маркетплейсы, контент-провайдеры")
+}
+
+System_Ext(recsys, "Рекомендательная система", "Сторонний сервис подборок")
+System_Ext(payment_ext, "Платёжные системы", "Эквайринг")
+System_Ext(loyalty_ext, "Сервисы лояльности / маркетплейсы", "Партнёры")
+System_Ext(content_ext, "Внешние стриминги и открытые источники", "Источники контента")
+
+Rel(user, web, "Использует", "HTTPS")
+Rel(user, mobile, "Использует", "HTTPS")
+Rel(user, tv, "Использует", "HTTPS")
+
+Rel(web, gateway, "API запросы", "HTTPS/REST")
+Rel(mobile, gateway, "API запросы", "HTTPS/REST")
+Rel(tv, gateway, "API запросы", "HTTPS/REST")
+
+Rel(gateway, bff_web, "Маршрутизирует", "REST")
+Rel(gateway, bff_mobile, "Маршрутизирует", "REST")
+Rel(gateway, bff_tv, "Маршрутизирует", "REST")
+Rel(gateway, monolith, "Непереведённые запросы (Strangler Fig)", "REST")
+
+Rel(bff_web, users_svc, "", "REST")
+Rel(bff_web, movies_svc, "", "REST")
+Rel(bff_web, ratings_svc, "", "REST")
+Rel(bff_web, video_svc, "", "REST")
+Rel(bff_web, subs_svc, "", "REST")
+Rel(bff_mobile, movies_svc, "", "REST")
+Rel(bff_tv, video_svc, "", "REST")
+
+Rel(users_svc, users_db, "Читает/пишет", "SQL")
+Rel(movies_svc, movies_db, "Читает/пишет", "SQL")
+Rel(ratings_svc, ratings_db, "Читает/пишет", "SQL")
+Rel(video_svc, video_store, "Читает", "HTTPS")
+Rel(subs_svc, subs_db, "Читает/пишет", "SQL")
+Rel(payments_svc, payments_db, "Читает/пишет", "SQL")
+
+Rel(users_svc, kafka, "user-events", "Kafka")
+Rel(ratings_svc, kafka, "movie-events", "Kafka")
+Rel(payments_svc, kafka, "payment-events", "Kafka")
+Rel(events_svc, kafka, "Публикует / читает события", "Kafka")
+Rel(subs_svc, kafka, "Подписан на payment-events", "Kafka")
+Rel(integrations_svc, kafka, "Подписан на события", "Kafka")
+
+Rel(subs_svc, payments_svc, "Инициирует оплату", "REST")
+Rel(payments_svc, payment_ext, "Проводит платежи", "HTTPS")
+Rel(integrations_svc, loyalty_ext, "Начисляет баллы, синхронизирует", "HTTPS")
+Rel(video_svc, content_ext, "Получает контент", "HTTPS")
+Rel(integrations_svc, recsys, "Передаёт события просмотров/оценок", "HTTPS")
+Rel(bff_web, recsys, "Получает подборки", "HTTPS")
+@enduml
